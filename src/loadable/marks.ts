@@ -48,22 +48,42 @@ export const rehydrateMarks = (marks?: string[]) => {
 
   const usedMarks = new Set<string>();
 
-  LOADABLE_MARKS.forEach(({ mark, loadable }) => {
+  const createTask = ({ mark, loadable }: MarkPair) => {
     if (markerOverlap(mark, rehydratedMarks)) {
       mark.forEach(m => usedMarks.add(m));
       tasks.push(loadable.load());
     }
-  });
+  };
 
-  rehydratedMarks.forEach(m => {
-    if (!usedMarks.has(m)) {
-      throw new Error(
-        `react-imported-component: unknown mark(${m}) has been used. Client and Server should have the same babel configuration.`
-      );
+  LOADABLE_MARKS.forEach(createTask);
+
+  let lastLoadableMarksKey = Array.from(LOADABLE_MARKS.keys());
+  const handleNestedMarks = (): Promise<void> => {
+    const nextLoadableMarksKey = Array.from(LOADABLE_MARKS.keys());
+    if (lastLoadableMarksKey.length === nextLoadableMarksKey.length) {
+      return Promise.resolve();
     }
-  });
+    const newMarks = nextLoadableMarksKey.slice(lastLoadableMarksKey.length - nextLoadableMarksKey.length);
+    newMarks
+      .map(k => {
+        return LOADABLE_MARKS.get(k) as MarkPair;
+      })
+      .forEach(createTask);
+    lastLoadableMarksKey = nextLoadableMarksKey;
+    return Promise.all(tasks).then(handleNestedMarks);
+  };
 
-  return Promise.all(tasks);
+  return Promise.all(tasks)
+    .then(handleNestedMarks)
+    .then(() => {
+      rehydratedMarks.forEach(m => {
+        if (!usedMarks.has(m)) {
+          throw new Error(
+            `react-imported-component: unknown mark(${m}) has been used. Client and Server should have the same babel configuration.`
+          );
+        }
+      });
+    });
 };
 
 /**
